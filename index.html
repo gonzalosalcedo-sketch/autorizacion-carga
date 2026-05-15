@@ -1102,7 +1102,8 @@ textarea.sidebar-input {
 .justif-otros-inp { width: 100%; background: white; border: 1px solid var(--border); color: var(--text); font-family: var(--sans); font-size: 12px; padding: 8px 10px; outline: none; }
 .justif-otros-inp:focus { border-color: var(--accent); }
 .justif-progress { font-family: var(--mono); font-size: 10px; color: var(--text-muted); text-align: center; margin-bottom: 12px; }
-.btn-export { background: transparent; border: 1px solid var(--border); color: var(--text-muted); font-family: var(--mono); font-size: 10px; padding: 6px 14px; cursor: pointer; letter-spacing: 1px; text-transform: uppercase; transition: all 0.15s; }
+.status-pill.reprogramado { background: var(--orange-light); color: var(--orange); }
+.np-row-wrap.reprogramado { background: var(--orange-light); border-left: 3px solid var(--orange); opacity: 0.85; } border: 1px solid var(--border); color: var(--text-muted); font-family: var(--mono); font-size: 10px; padding: 6px 14px; cursor: pointer; letter-spacing: 1px; text-transform: uppercase; transition: all 0.15s; }
 .btn-export:hover { border-color: var(--border-dark); color: var(--text); }
 </style>
 </head>
@@ -1346,6 +1347,32 @@ textarea.sidebar-input {
 <!-- TOAST -->
 <div class="toast-wrap" id="toastWrap"></div>
 
+<!-- MODAL REPROGRAMAR -->
+<div class="modal-ov" id="reprogModal">
+  <div class="modal" style="max-width:480px;">
+    <div class="modal-title" style="color:var(--orange);">⚡ Reprogramar NP</div>
+    <div class="justif-np-info">
+      <div class="justif-np-num" id="reprogNPNum"></div>
+      <div class="justif-np-det" id="reprogNPDet"></div>
+    </div>
+    <div style="font-family:var(--mono);font-size:9px;color:var(--text-dim);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:8px;">Motivo de reprogramación</div>
+    <div class="justif-options" id="reprogOpts">
+      <label class="justif-opt"><input type="radio" name="reprogCausa" value="Cliente no se presenta a cargar"><span class="justif-opt-lbl">Cliente no se presenta a cargar</span></label>
+      <label class="justif-opt"><input type="radio" name="reprogCausa" value="Reprogramado por problemas en la carga"><span class="justif-opt-lbl">Reprogramado por problemas en la carga</span></label>
+      <label class="justif-opt"><input type="radio" name="reprogCausa" value="Reprogramado por problemas del Tte"><span class="justif-opt-lbl">Reprogramado por problemas del Tte</span></label>
+      <label class="justif-opt"><input type="radio" name="reprogCausa" value="Reprogramado por demoras de carga"><span class="justif-opt-lbl">Reprogramado por demoras de carga</span></label>
+      <label class="justif-opt" onclick="toggleReprogOtras()"><input type="radio" name="reprogCausa" value="otras"><span class="justif-opt-lbl">Otras causas: aclarar</span></label>
+    </div>
+    <div class="justif-otras" id="reprogOtrasDiv">
+      <input class="justif-otros-inp" id="reprogOtrasText" placeholder="Describí brevemente el motivo...">
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeReprogModal()">Cancelar</button>
+      <button class="btn-confirm" style="background:var(--orange);" onclick="saveReprog()">Guardar reprogramación</button>
+    </div>
+  </div>
+</div>
+
 <!-- MODAL JUSTIFICACIÓN PENDIENTES -->
 <div class="modal-ov" id="justifModal">
   <div class="modal" style="max-width:520px;">
@@ -1446,9 +1473,50 @@ textarea.sidebar-input {
 
 <script>
 // ── CONFIG ────────────────────────────────────────────────────────────────────
-const SHEET_ID = '1Z6PSsKjYca1386zi5RkMqfdE2g2pEJPkeZdDhnvJdcQ';
-const API_KEY  = 'AIzaSyBkQBvrcGH-lFTfZx9gxNVhSbZAjFQaLVM';
-const RANGE    = 'A:Z'; // leemos hasta Z para no perder columnas
+const SHEET_ID   = '1Z6PSsKjYca1386zi5RkMqfdE2g2pEJPkeZdDhnvJdcQ';
+const API_KEY    = 'AIzaSyBkQBvrcGH-lFTfZx9gxNVhSbZAjFQaLVM';
+const RANGE      = 'A:Z';
+const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzzKmg5keQqD2_JlYjJeuS6UviVrTV2-_J7HNv8DwST5ntGru6c83rAMt9RKJYeXh4l/exec';
+
+// ── ESCRITURA EN SHEETS VÍA APPS SCRIPT ──────────────────────────────────────
+async function registrarEnSheets(np) {
+  const fecha = todayFormatted();
+  try {
+    await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      mode: 'no-cors', // Apps Script no devuelve CORS headers, usamos no-cors
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fecha,
+        np: np.np,
+        cliente: np.cliente,
+        detalle: np.detalle,
+        cant: np.cantAutorizar,
+        um: np.um,
+        estado: np.estado === 'autorizado' ? 'Autorizado'
+               : np.estado === 'reprogramado' ? 'Reprogramado'
+               : np.estado === 'parcial' ? 'Parcial'
+               : 'Pendiente',
+        causa: np.causa || ''
+      })
+    });
+    // no-cors no devuelve respuesta legible, asumimos éxito si no lanza error
+  } catch(err) {
+    console.warn('Error al registrar en Sheets:', err);
+  }
+}
+
+// ── LECTURA DEL HISTORIAL DESDE SHEETS ───────────────────────────────────────
+async function cargarHistorialSheets() {
+  try {
+    const res = await fetch(`${APPS_SCRIPT_URL}?hoja=REGISTRO_CARGAS`);
+    const json = await res.json();
+    return json.ok ? json.data : [];
+  } catch(err) {
+    console.warn('Error al leer historial:', err);
+    return [];
+  }
+}
 
 // Destinatarios fijos iniciales
 let destinatarios = [
@@ -1550,6 +1618,9 @@ async function loadFromSheets() {
 
     hideError();
     parseSheetData(rows);
+    restaurarEstadoDia(); // ← restaurar estados tras cargar planilla
+    renderList();
+    updateStats();
     document.getElementById('sheetBadge').textContent = '✓ Sheets actualizado';
     toast('Planilla cargada correctamente', 'success');
   } catch(err) {
@@ -1795,13 +1866,70 @@ function sendAutorizacion(id) {
 
   addLog(np, `✓ NP-${np.np} autorizada — ${np.cantAutorizar} ${np.um} ${np.detalle}`);
   toast(`Gmail abierto para NP-${np.np} · ${np.cliente}`, 'success');
+  saveEstadoDia();
+  cerrarDia(isoHoy(), nps);
+  registrarEnSheets(np);
 
   expandId = null;
   renderList();
   updateStats();
 }
 
-// ── SELECCIÓN ─────────────────────────────────────────────────────────────────
+// ── REPROGRAMAR ───────────────────────────────────────────────────────────────
+let reprogNPId = null;
+
+function openReprogModal(id) {
+  const np = nps.find(n => n.id === id);
+  if (!np) return;
+  reprogNPId = id;
+  document.getElementById('reprogNPNum').textContent = `NP-${np.np} · ${np.cliente}`;
+  document.getElementById('reprogNPDet').textContent = `${np.cantAutorizar} ${np.um} — ${np.detalle}`;
+  document.querySelectorAll('input[name=reprogCausa]').forEach(r => r.checked = false);
+  document.getElementById('reprogOtrasDiv').classList.remove('show');
+  document.getElementById('reprogOtrasText').value = '';
+  document.getElementById('reprogModal').classList.add('open');
+}
+
+function closeReprogModal() {
+  document.getElementById('reprogModal').classList.remove('open');
+  reprogNPId = null;
+}
+
+function toggleReprogOtras() {
+  setTimeout(() => {
+    const sel = document.querySelector('input[name=reprogCausa]:checked');
+    document.getElementById('reprogOtrasDiv').classList.toggle('show', sel && sel.value === 'otras');
+  }, 50);
+}
+
+function saveReprog() {
+  const sel = document.querySelector('input[name=reprogCausa]:checked');
+  if (!sel) { toast('Seleccioná un motivo', 'warn'); return; }
+  let causa = sel.value;
+  if (causa === 'otras') {
+    const txt = document.getElementById('reprogOtrasText').value.trim();
+    if (!txt) { toast('Describí el motivo', 'warn'); return; }
+    causa = `Otras: ${txt}`;
+  }
+  const np = nps.find(n => n.id === reprogNPId);
+  if (!np) return;
+  np.estado = 'reprogramado';
+  np.causa = causa;
+  const now = new Date();
+  const p = x => String(x).padStart(2,'0');
+  np.horaAut = `${p(now.getHours())}:${p(now.getMinutes())}`;
+  saveEstadoDia();
+  cerrarDia(isoHoy(), nps);
+  registrarEnSheets(np);
+  addLog(np, `⚡ NP-${np.np} reprogramada — ${causa}`);
+  toast(`NP-${np.np} marcada como reprogramada`, 'warn');
+  closeReprogModal();
+  expandId = null;
+  renderList();
+  updateStats();
+}
+
+document.getElementById('reprogModal').addEventListener('click', e => { if(e.target===e.currentTarget) closeReprogModal(); });
 let seleccionados = new Set(); // ids seleccionados
 
 function toggleSelect(id, checked) {
@@ -1969,6 +2097,9 @@ function sendGroupAutorizacion() {
 
   addLog(items[0], msg);
   toast(`Gmail abierto — ${msg}`, 'success');
+  saveEstadoDia();
+  cerrarDia(isoHoy(), nps);
+  items.forEach(np => registrarEnSheets(np));
 
   seleccionados.clear();
   updateGroupBar();
@@ -1988,14 +2119,21 @@ function renderList() {
     return;
   }
 
-  list.innerHTML = data.map(np => `
+  list.innerHTML = data.map(np => {
+    const esActivo = np.estado === 'pendiente' || np.estado === 'parcial';
+    const esCerrado = np.estado === 'autorizado' || np.estado === 'reprogramado';
+    const estadoLabel = {
+      pendiente: 'Pendiente', autorizado: '✓ Autorizado',
+      parcial: '⚡ Parcial', reprogramado: '⟳ Reprogramado'
+    }[np.estado] || np.estado;
+    return `
     <div class="np-row-wrap ${np.estado} ${seleccionados.has(np.id) ? 'selected' : ''}" id="card-${np.id}">
       <div class="np-row" style="grid-template-columns: 36px 80px 1fr 180px 90px 60px 110px 130px;" onclick="toggleExpand(${np.id})">
         <div class="td cb-wrap" onclick="event.stopPropagation()">
-          ${np.estado !== 'autorizado'
+          ${esActivo
             ? `<input type="checkbox" class="cb" ${seleccionados.has(np.id) ? 'checked' : ''}
                 onchange="toggleSelect(${np.id}, this.checked)">`
-            : `<span style="color:var(--text-dim);font-size:14px;">✓</span>`
+            : `<span style="color:var(--text-dim);font-size:14px;">${np.estado==='autorizado'?'✓':'⟳'}</span>`
           }
         </div>
         <div class="td td-np">NP-${np.np}</div>
@@ -2004,13 +2142,12 @@ function renderList() {
         <div class="td td-cant">${np.cantAutorizar}${np.cantAutorizar !== np.cantOriginal ? `<span style="font-size:9px;color:var(--orange);display:block;">orig: ${np.cantOriginal}</span>` : ''}</div>
         <div class="td td-um">${np.um}</div>
         <div class="td">
-          <span class="status-pill ${np.estado}">
-            ${np.estado === 'pendiente' ? 'Pendiente' : np.estado === 'autorizado' ? '✓ Autorizado' : '⚡ Parcial'}
-          </span>
+          <span class="status-pill ${np.estado}">${estadoLabel}</span>
           ${np.horaAut ? `<div style="font-family:var(--mono);font-size:9px;color:var(--text-dim);margin-top:3px;">${np.horaAut}</div>` : ''}
+          ${np.causa ? `<div style="font-size:9px;color:var(--orange);margin-top:2px;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${np.causa}">${np.causa}</div>` : ''}
         </div>
         <div class="td">
-          ${np.estado !== 'autorizado'
+          ${esActivo
             ? `<button class="btn-autorizar" onclick="event.stopPropagation();openExpand(${np.id})">▶ Autorizar</button>`
             : `<button class="btn-ver" onclick="event.stopPropagation();openExpand(${np.id})">Ver detalle</button>`
           }
@@ -2023,10 +2160,11 @@ function renderList() {
             <input class="qty-inp" type="number" id="qty-${np.id}"
               value="${np.cantAutorizar}" min="0.01" step="0.01"
               oninput="updateQty(${np.id},this.value)"
-              ${np.estado === 'autorizado' ? 'disabled' : ''}>
+              ${esCerrado ? 'disabled' : ''}>
             <span class="qty-um">${np.um}</span>
           </div>
           ${np.cantAutorizar !== np.cantOriginal ? `<div class="qty-hint">Original: ${np.cantOriginal} ${np.um}</div>` : ''}
+          ${np.causa ? `<div class="expand-lbl" style="margin-top:10px;">Motivo</div><div style="font-size:12px;color:var(--orange);">${np.causa}</div>` : ''}
           <div class="qty-hint" style="margin-top:8px;">Modificá la cantidad antes de enviar si es necesario</div>
         </div>
         <div class="mail-prev">
@@ -2035,19 +2173,15 @@ function renderList() {
           <div class="mail-body-prev" id="mb-${np.id}">${getMailBody(np)}</div>
         </div>
         <div class="expand-send-col">
-          <button class="btn-send-real" id="btnSend-${np.id}"
-            onclick="sendAutorizacion(${np.id})"
-            ${np.estado === 'autorizado' ? 'disabled' : ''}>
-            ✉ Enviar
-          </button>
-          ${np.estado !== 'autorizado' ? `
-          <button class="btn-mark-parcial" onclick="markParcial(${np.id})">
-            ⚡ Parcial
-          </button>` : ''}
+          ${esActivo ? `
+          <button class="btn-send-real" id="btnSend-${np.id}" onclick="sendAutorizacion(${np.id})">✉ Enviar</button>
+          <button class="btn-mark-parcial" onclick="markParcial(${np.id})">⚡ Parcial</button>
+          <button class="btn-mark-parcial" style="border-color:var(--orange);color:var(--orange);" onclick="event.stopPropagation();openReprogModal(${np.id})">⟳ Reprogramar</button>
+          ` : `<button class="btn-ver" style="width:100%;" disabled>${estadoLabel}</button>`}
         </div>
       </div>
-    </div>
-  `).join('');
+    </div>`;
+  }).join('');
 }
 
 function toggleExpand(id) {
@@ -2086,6 +2220,9 @@ function markParcial(id) {
   np.estado = 'parcial';
   addLog(np, `⚡ NP-${np.np} marcada PARCIAL — ${np.cantAutorizar} ${np.um}`);
   toast(`NP-${np.np} marcada como parcial`, 'warn');
+  saveEstadoDia();
+  cerrarDia(isoHoy(), nps);
+  registrarEnSheets(np);
   updateStats();
   renderList();
 }
@@ -2185,9 +2322,9 @@ function switchTab(name, btn) {
 }
 
 // ── STORAGE HISTORIAL (localStorage) ─────────────────────────────────────────
-// Estructura: { 'YYYY-MM-DD': [ {np, cliente, detalle, cant, um, estado, causa, horaAut}, ... ] }
-const HIST_KEY = 'cds_historial_v1';
-const SNAPSHOT_KEY = 'cds_snapshot_v1'; // snapshot del día al arrancar
+const HIST_KEY     = 'cds_historial_v1';
+const SNAPSHOT_KEY = 'cds_snapshot_v1';
+const ESTADO_KEY   = 'cds_estado_dia_v1'; // persiste el estado del día actual
 
 function loadHist() {
   try { return JSON.parse(localStorage.getItem(HIST_KEY) || '{}'); } catch { return {}; }
@@ -2198,6 +2335,33 @@ function loadSnapshot() {
   try { return JSON.parse(localStorage.getItem(SNAPSHOT_KEY) || 'null'); } catch { return null; }
 }
 function saveSnapshot(snap) { localStorage.setItem(SNAPSHOT_KEY, JSON.stringify(snap)); }
+
+// Estado del día: guarda estado, horaAut y causa de cada NP
+function loadEstadoDia() {
+  try { return JSON.parse(localStorage.getItem(ESTADO_KEY) || 'null'); } catch { return null; }
+}
+function saveEstadoDia() {
+  const estado = {
+    fecha: isoHoy(),
+    nps: nps.map(n => ({ np: n.np, estado: n.estado, horaAut: n.horaAut||null, causa: n.causa||null, cantAutorizar: n.cantAutorizar }))
+  };
+  localStorage.setItem(ESTADO_KEY, JSON.stringify(estado));
+}
+
+// Restaurar estado del día si el refresh es del mismo día
+function restaurarEstadoDia() {
+  const est = loadEstadoDia();
+  if (!est || est.fecha !== isoHoy()) return;
+  est.nps.forEach(saved => {
+    const np = nps.find(n => n.np === saved.np);
+    if (np) {
+      np.estado = saved.estado;
+      np.horaAut = saved.horaAut;
+      np.causa = saved.causa;
+      np.cantAutorizar = saved.cantAutorizar || np.cantOriginal;
+    }
+  });
+}
 
 // Guardar snapshot del día actual cuando se carga la planilla
 function guardarSnapshotHoy() {
@@ -2252,11 +2416,16 @@ function checkPendientesAyer() {
   const hist = loadHist();
   const registroAyer = hist[snap.fecha];
 
-  // NPs del snapshot que no fueron autorizadas
+  // NPs del snapshot que no fueron autorizadas (incluye reprogramadas sin causa del día anterior)
   pendientesQueue = snap.nps.filter(snapNP => {
-    if (!registroAyer) return true; // no se registró nada ese día
+    if (!registroAyer) return true;
     const registrada = registroAyer.find(r => r.np === snapNP.np);
-    return !registrada || registrada.estado !== 'autorizado';
+    if (!registrada) return true;
+    // Si fue autorizada, no pedir justificación
+    if (registrada.estado === 'autorizado') return false;
+    // Si fue reprogramada con causa ya registrada, no volver a pedir
+    if (registrada.estado === 'reprogramado' && registrada.causa) return false;
+    return true;
   });
 
   if (pendientesQueue.length === 0) {
@@ -2326,56 +2495,58 @@ function saveJustificacion() {
 }
 
 // ── HISTORIAL: FILTRO Y RENDER ────────────────────────────────────────────────
-function applyHistFilter() {
+async function applyHistFilter() {
   const desde = document.getElementById('histDesde').value;
   const hasta = document.getElementById('histHasta').value;
-  const hist = loadHist();
 
-  // Filtrar fechas
-  let entries = Object.entries(hist); // [ [iso, [nps...]], ... ]
-  if (desde) entries = entries.filter(([d]) => d >= desde);
-  if (hasta) entries = entries.filter(([d]) => d <= hasta);
-  entries.sort((a,b) => b[0].localeCompare(a[0])); // más reciente primero
+  // Mostrar loading
+  document.getElementById('histRows').innerHTML = `<div class="empty-state" style="padding:32px;"><div class="spinner dark" style="margin:0 auto 10px;"></div>Cargando historial...</div>`;
 
-  // Aplanar
-  const rows = entries.flatMap(([fecha, nps]) =>
-    nps.map(n => ({ fecha, ...n }))
-  );
+  // Leer desde Sheets
+  const sheetData = await cargarHistorialSheets();
+
+  // Filtrar por fecha
+  const rows = sheetData.filter(r => {
+    if (!r.fecha) return false;
+    const iso = fechaAIso(String(r.fecha));
+    if (desde && iso < desde) return false;
+    if (hasta && iso > hasta) return false;
+    return true;
+  }).sort((a,b) => fechaAIso(String(b.fecha)).localeCompare(fechaAIso(String(a.fecha))));
 
   // Stats
   const total = rows.length;
-  const aut = rows.filter(r => r.estado === 'autorizado').length;
-  const pend = rows.filter(r => r.estado !== 'autorizado').length;
-  const pct = total > 0 ? Math.round(aut/total*100) : 0;
+  const aut   = rows.filter(r => String(r.estado).toLowerCase() === 'autorizado').length;
+  const pend  = rows.filter(r => String(r.estado).toLowerCase() !== 'autorizado').length;
+  const pct   = total > 0 ? Math.round(aut/total*100) : 0;
 
   document.getElementById('hTotal').textContent = total || '—';
-  document.getElementById('hAut').textContent = aut || '—';
-  document.getElementById('hPend').textContent = pend || '—';
-  document.getElementById('hPct').textContent = total > 0 ? `${pct}%` : '—';
+  document.getElementById('hAut').textContent   = aut   || '—';
+  document.getElementById('hPend').textContent  = pend  || '—';
+  document.getElementById('hPct').textContent   = total > 0 ? `${pct}%` : '—';
 
   // Tabla
   const tbody = document.getElementById('histRows');
   if (rows.length === 0) {
     tbody.innerHTML = `<div class="empty-state" style="padding:32px;">Sin registros para el período seleccionado.</div>`;
   } else {
-    tbody.innerHTML = rows.map(r => `
+    tbody.innerHTML = rows.map(r => {
+      const estadoLower = String(r.estado).toLowerCase();
+      const pillClass = estadoLower === 'autorizado' ? 'aut' : 'pend';
+      const pillLabel = r.estado;
+      return `
       <div class="hist-row">
-        <div class="hist-td mono">${isoAFecha(r.fecha)}</div>
+        <div class="hist-td mono">${r.fecha}</div>
         <div class="hist-td mono" style="color:var(--accent);">NP-${r.np}</div>
         <div class="hist-td" style="overflow:hidden;">
           <div style="font-weight:600;font-size:11px;">${r.cliente}</div>
           <div style="font-size:10px;color:var(--text-muted);">${r.detalle}</div>
         </div>
         <div class="hist-td muted">${r.cant} ${r.um}</div>
-        <div class="hist-td">
-          <span class="hist-pill ${r.estado === 'autorizado' ? 'aut' : 'pend'}">
-            ${r.estado === 'autorizado' ? '✓ Salió' : '✕ No salió'}
-          </span>
-          ${r.horaAut ? `<div style="font-family:var(--mono);font-size:9px;color:var(--text-dim);">${r.horaAut}</div>` : ''}
-        </div>
+        <div class="hist-td"><span class="hist-pill ${pillClass}">${pillLabel}</span></div>
         <div class="hist-td muted">${r.causa ? `<span class="hist-pill justif">${r.causa}</span>` : '—'}</div>
-      </div>
-    `).join('');
+      </div>`;
+    }).join('');
   }
 
   // Gráfico de causas
@@ -2387,27 +2558,30 @@ function applyHistFilter() {
   const maxC = sortedCausas[0]?.[1] || 1;
   const chart = document.getElementById('causaChart');
   if (sortedCausas.length === 0) {
-    chart.innerHTML = `<div style="font-family:var(--mono);font-size:10px;color:var(--text-dim);padding:20px 0;">Sin causas registradas.</div>`;
+    chart.innerHTML = `<div style="font-family:var(--mono);font-size:10px;color:var(--text-dim);padding:20px 0;">Sin causas registradas aún.</div>`;
   } else {
     chart.innerHTML = sortedCausas.map(([causa, cnt]) => `
       <div class="causa-bar-row">
         <div class="causa-bar-lbl" title="${causa}">${causa}</div>
-        <div class="causa-bar-track">
-          <div class="causa-bar-fill" style="width:${Math.round(cnt/maxC*100)}%"></div>
-        </div>
+        <div class="causa-bar-track"><div class="causa-bar-fill" style="width:${Math.round(cnt/maxC*100)}%"></div></div>
         <div class="causa-bar-count">${cnt}</div>
       </div>
     `).join('');
   }
 }
 
+function fechaAIso(f) {
+  // DD/MM/YYYY → YYYY-MM-DD para ordenar
+  const m = f.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+  if (m) return `${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`;
+  return f; // si ya es ISO o formato desconocido, devolver igual
+}
+
 // Exportar CSV
-function exportCSV() {
-  const hist = loadHist();
-  const rows = Object.entries(hist).flatMap(([fecha, nps]) =>
-    nps.map(n => [isoAFecha(fecha), n.np, n.cliente, n.detalle, n.cant, n.um, n.estado, n.horaAut||'', n.causa||''])
-  );
-  const header = ['Fecha','NP','Cliente','Detalle','Cant','UM','Estado','Hora Aut','Causa'];
+async function exportCSV() {
+  const data = await cargarHistorialSheets();
+  const header = ['Fecha','NP','Cliente','Detalle','Cant','UM','Estado','Causa'];
+  const rows = data.map(r => [r.fecha, r.np, r.cliente, r.detalle, r.cant, r.um, r.estado, r.causa||'']);
   const csv = [header, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
   const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
   const url = URL.createObjectURL(blob);
