@@ -1481,26 +1481,25 @@ const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzzKmg5keQqD2_J
 // ── ESCRITURA EN SHEETS VÍA APPS SCRIPT ──────────────────────────────────────
 async function registrarEnSheets(np) {
   const fecha = todayFormatted();
+  const estado = np.estado === 'autorizado'    ? 'Autorizado'
+               : np.estado === 'reprogramado'  ? 'Reprogramado'
+               : np.estado === 'parcial'        ? 'Parcial'
+               : 'Pendiente';
+  const params = new URLSearchParams({
+    fecha,
+    np:       np.np,
+    cliente:  np.cliente,
+    detalle:  np.detalle,
+    cant:     np.cantAutorizar,
+    um:       np.um,
+    estado,
+    causa:    np.causa || ''
+  });
   try {
-    await fetch(APPS_SCRIPT_URL, {
+    await fetch(`${APPS_SCRIPT_URL}?${params.toString()}`, {
       method: 'POST',
-      mode: 'no-cors', // Apps Script no devuelve CORS headers, usamos no-cors
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        fecha,
-        np: np.np,
-        cliente: np.cliente,
-        detalle: np.detalle,
-        cant: np.cantAutorizar,
-        um: np.um,
-        estado: np.estado === 'autorizado' ? 'Autorizado'
-               : np.estado === 'reprogramado' ? 'Reprogramado'
-               : np.estado === 'parcial' ? 'Parcial'
-               : 'Pendiente',
-        causa: np.causa || ''
-      })
+      mode: 'no-cors'
     });
-    // no-cors no devuelve respuesta legible, asumimos éxito si no lanza error
   } catch(err) {
     console.warn('Error al registrar en Sheets:', err);
   }
