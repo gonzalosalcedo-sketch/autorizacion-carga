@@ -1476,7 +1476,7 @@ textarea.sidebar-input {
 const SHEET_ID   = '1Z6PSsKjYca1386zi5RkMqfdE2g2pEJPkeZdDhnvJdcQ';
 const API_KEY    = 'AIzaSyBkQBvrcGH-lFTfZx9gxNVhSbZAjFQaLVM';
 const RANGE      = 'A:Z';
-const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzzKmg5keQqD2_JlYjJeuS6UviVrTV2-_J7HNv8DwST5ntGru6c83rAMt9RKJYeXh4l/exec';
+const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyCCu6wh-eBdrLszpEyMMAyoL4i3C8nmpSeivKMguAdP2AbCBbUK7SAO19DgG1w0KEM/exec';
 
 // ── ESCRITURA EN SHEETS VÍA APPS SCRIPT ──────────────────────────────────────
 async function registrarEnSheets(np) {
@@ -1493,7 +1493,8 @@ async function registrarEnSheets(np) {
     cant:     np.cantAutorizar,
     um:       np.um,
     estado,
-    causa:    np.causa || ''
+    causa:    np.causa || '',
+    horaAut:  np.horaAut || ''
   });
   try {
     await fetch(`${APPS_SCRIPT_URL}?${params.toString()}`, {
@@ -1505,7 +1506,30 @@ async function registrarEnSheets(np) {
   }
 }
 
-// ── LECTURA DEL HISTORIAL DESDE SHEETS ───────────────────────────────────────
+// ── RESTAURAR ESTADO DESDE SHEETS ────────────────────────────────────────────
+async function restaurarEstadoDesdeSheets() {
+  const hoy = todayFormatted(); // DD/MM/YYYY
+  try {
+    const res = await fetch(`${APPS_SCRIPT_URL}?hoja=REGISTRO_CARGAS`);
+    const json = await res.json();
+    if (!json.ok || !json.data) return;
+    // Filtrar solo registros de hoy
+    const registrosHoy = json.data.filter(r => String(r.fecha) === hoy);
+    registrosHoy.forEach(r => {
+      const np = nps.find(n => n.np === String(r.np));
+      if (!np) return;
+      np.estado = String(r.estado).toLowerCase() === 'autorizado'   ? 'autorizado'
+                : String(r.estado).toLowerCase() === 'reprogramado' ? 'reprogramado'
+                : String(r.estado).toLowerCase() === 'parcial'      ? 'parcial'
+                : 'pendiente';
+      np.causa     = r.causa || null;
+      np.cantAutorizar = parseFloat(r.cant) || np.cantOriginal;
+      if (np.estado !== 'pendiente') np.horaAut = r.horaAut || r.hora_aut || null;
+    });
+  } catch(err) {
+    console.warn('No se pudo restaurar estado desde Sheets:', err);
+  }
+}
 async function cargarHistorialSheets() {
   try {
     const res = await fetch(`${APPS_SCRIPT_URL}?hoja=REGISTRO_CARGAS`);
@@ -1617,7 +1641,8 @@ async function loadFromSheets() {
 
     hideError();
     parseSheetData(rows);
-    restaurarEstadoDia(); // ← restaurar estados tras cargar planilla
+    restaurarEstadoDia(); // localStorage como fallback rápido
+    await restaurarEstadoDesdeSheets(); // Sheets como fuente de verdad compartida
     renderList();
     updateStats();
     document.getElementById('sheetBadge').textContent = '✓ Sheets actualizado';
@@ -1968,17 +1993,20 @@ function updateGroupBar() {
 
 // ── MODAL GRUPAL ──────────────────────────────────────────────────────────────
 function buildGroupSubject(items) {
-  if (items.length === 1) return getMailSubject(items[0]);
   const npsUnicos = [...new Set(items.map(n => n.np))].join(' // ');
   const clientesUnicos = [...new Set(items.map(n => n.cliente))];
-  const cliente = clientesUnicos.length === 1 ? clientesUnicos[0].toUpperCase() : 'VARIOS CLIENTES';
+  // Si todos son del mismo cliente, usar ese cliente; si no, listarlos
+  const cliente = clientesUnicos.length === 1
+    ? clientesUnicos[0].toUpperCase()
+    : clientesUnicos.map(c => c.toUpperCase()).join(' · ');
   return `AUTORIZACIÓN DE CARGA NP ${npsUnicos} // ${cliente}`;
 }
 
 function buildGroupBody(items, nota) {
   const firma = buildFirmaText();
+  // En el cuerpo solo figura cant, um y detalle — sin cliente (ya está en el asunto)
   const itemLines = items.map(n =>
-    `• ${n.cantAutorizar} ${n.um}  ${n.detalle}  [NP-${n.np} · ${n.cliente}]`
+    `• ${n.cantAutorizar} ${n.um}  ${n.detalle}  [NP-${n.np}]`
   ).join('\n');
   const notaBlock = nota ? `\nObservación: ${nota}\n` : '';
   return `Estimados, buen día.
