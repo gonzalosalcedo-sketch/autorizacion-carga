@@ -1488,6 +1488,7 @@ async function registrarEnSheets(np) {
   const params = new URLSearchParams({
     fecha,
     np:       np.np,
+    lineaId:  np.lineaId || np.np, // identificador único de fila
     cliente:  np.cliente,
     detalle:  np.detalle,
     cant:     np.cantAutorizar,
@@ -1513,35 +1514,37 @@ async function restaurarEstadoDesdeSheets() {
     const res = await fetch(`${APPS_SCRIPT_URL}?hoja=REGISTRO_CARGAS`);
     const json = await res.json();
     if (!json.ok || !json.data) return;
-    // Filtrar solo registros de hoy — normalizamos la fecha que viene de Sheets
-    // porque puede llegar como string, Date serializado, o DD/MM/YYYY
+
+    // Filtrar registros de hoy — acepta fecha como string DD/MM/YYYY o Date serializado
     const registrosHoy = json.data.filter(r => {
       const fechaRaw = String(r.fecha);
-      // Intentar normalizar con normalizarFecha
       const fechaNorm = normalizarFecha(fechaRaw);
       if (fechaNorm === hoy) return true;
-      // Si no matchea, intentar parsear como Date de JS serializado
-      // ej: "Sun May 18 2026 00:00:00 GMT-0300"
       try {
         const d = new Date(fechaRaw);
         if (!isNaN(d.getTime())) {
           const p = x => String(x).padStart(2,'0');
-          const formatted = `${p(d.getDate())}/${p(d.getMonth()+1)}/${d.getFullYear()}`;
-          return formatted === hoy;
+          return `${p(d.getDate())}/${p(d.getMonth()+1)}/${d.getFullYear()}` === hoy;
         }
       } catch(_) {}
       return false;
     });
+
+    // Aplicar estado — buscar por lineaId primero para manejar viajes múltiples
     registrosHoy.forEach(r => {
-      const np = nps.find(n => String(n.np) === String(r.np));
-      if (!np) return;
-      np.estado = String(r.estado).toLowerCase() === 'autorizado'   ? 'autorizado'
-                : String(r.estado).toLowerCase() === 'reprogramado' ? 'reprogramado'
-                : String(r.estado).toLowerCase() === 'parcial'      ? 'parcial'
-                : 'pendiente';
-      np.causa         = r.causa || null;
-      np.cantAutorizar = parseFloat(r.cant) || np.cantOriginal;
-      if (np.estado !== 'pendiente') np.horaAut = r.horaAut || null;
+      const np = r.lineaId
+        ? nps.find(n => n.lineaId === String(r.lineaId))
+        : null;
+      // Fallback: primera pendiente con ese NP
+      const target = np || nps.find(n => String(n.np) === String(r.np) && n.estado === 'pendiente');
+      if (!target) return;
+      target.estado = String(r.estado).toLowerCase() === 'autorizado'   ? 'autorizado'
+                    : String(r.estado).toLowerCase() === 'reprogramado' ? 'reprogramado'
+                    : String(r.estado).toLowerCase() === 'parcial'      ? 'parcial'
+                    : 'pendiente';
+      target.causa         = r.causa || null;
+      target.cantAutorizar = parseFloat(r.cant) || target.cantOriginal;
+      if (target.estado !== 'pendiente') target.horaAut = r.horaAut || null;
     });
   } catch(err) {
     console.warn('No se pudo restaurar estado desde Sheets:', err);
@@ -1747,7 +1750,7 @@ function parseSheetData(rows) {
       if (fechaNorm !== todayStr) continue; // excluir si no matchea o si fecha vacía/no parseable
     }
 
-    const existing = nps.find(n => n.np === np && n.source === 'sheet');
+    const existing = nps.find(n => n.np === np && n.rowIndex === i && n.source === 'sheet');
     if (existing) {
       existing.cliente = cli; existing.detalle = det;
       existing.cantOriginal = cant;
@@ -1756,7 +1759,10 @@ function parseSheetData(rows) {
       nuevos.push(existing);
     } else {
       nuevos.push({
-        id: nextId++, np, cliente: cli, detalle: det,
+        id: nextId++,
+        lineaId: `${np}_${i}`, // identificador único por fila (NP + índice de fila)
+        rowIndex: i,
+        np, cliente: cli, detalle: det,
         cantOriginal: cant, cantAutorizar: cant,
         um, fecha, estado: 'pendiente', horaAut: null, source: 'sheet'
       });
@@ -1838,18 +1844,26 @@ function getMailSubject(np) {
   return `AUTORIZACIÓN DE CARGA NP ${np.np} // ${np.cliente.toUpperCase()}`;
 }
 
-function getMailBody(np) {
+function getMailBody(np, nota = '') {
   const firma = buildFirmaText();
+  const notaBlock = nota ? `\nObservación: ${nota}\n` : '';
   return `Estimados, buen día.
 
 El cliente ingresa a cargar:
 
 ${np.cantAutorizar} ${np.um}  ${np.detalle}
-
+${notaBlock}
 Quedo a disposición ante cualquier consulta.
 Saludos cordiales.
 
 ${firma}`;
+}
+
+function updateNotaPreview(id, val) {
+  const np = nps.find(n => n.id === id);
+  if (!np) return;
+  const mb = document.getElementById(`mb-${id}`);
+  if (mb) mb.textContent = getMailBody(np, val);
 }
 
 function buildFirmaText() {
@@ -1894,8 +1908,9 @@ function sendAutorizacion(id) {
   if (!np) return;
   if (destinatarios.length === 0) { toast('Agregá al menos un destinatario','error'); return; }
 
+  const nota = document.getElementById(`nota-${id}`)?.value?.trim() || '';
   const subject = getMailSubject(np);
-  const body = getMailBody(np);
+  const body = getMailBody(np, nota);
 
   abrirGmail(subject, body);
 
@@ -2210,6 +2225,12 @@ function renderList() {
           ${np.cantAutorizar !== np.cantOriginal ? `<div class="qty-hint">Original: ${np.cantOriginal} ${np.um}</div>` : ''}
           ${np.causa ? `<div class="expand-lbl" style="margin-top:10px;">Motivo</div><div style="font-size:12px;color:var(--orange);">${np.causa}</div>` : ''}
           <div class="qty-hint" style="margin-top:8px;">Modificá la cantidad antes de enviar si es necesario</div>
+          ${esActivo ? `
+          <div class="expand-lbl" style="margin-top:12px;">Observación (opcional)</div>
+          <input class="qty-inp" type="text" id="nota-${np.id}"
+            placeholder="ej: Fletero Juan Pérez"
+            style="width:100%;font-size:11px;font-family:var(--sans);"
+            oninput="updateNotaPreview(${np.id}, this.value)">` : ''}
         </div>
         <div class="mail-prev">
           <div class="mail-prev-lbl">Vista previa del mail</div>
