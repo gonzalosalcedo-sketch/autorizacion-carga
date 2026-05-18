@@ -1513,18 +1513,35 @@ async function restaurarEstadoDesdeSheets() {
     const res = await fetch(`${APPS_SCRIPT_URL}?hoja=REGISTRO_CARGAS`);
     const json = await res.json();
     if (!json.ok || !json.data) return;
-    // Filtrar solo registros de hoy
-    const registrosHoy = json.data.filter(r => String(r.fecha) === hoy);
+    // Filtrar solo registros de hoy — normalizamos la fecha que viene de Sheets
+    // porque puede llegar como string, Date serializado, o DD/MM/YYYY
+    const registrosHoy = json.data.filter(r => {
+      const fechaRaw = String(r.fecha);
+      // Intentar normalizar con normalizarFecha
+      const fechaNorm = normalizarFecha(fechaRaw);
+      if (fechaNorm === hoy) return true;
+      // Si no matchea, intentar parsear como Date de JS serializado
+      // ej: "Sun May 18 2026 00:00:00 GMT-0300"
+      try {
+        const d = new Date(fechaRaw);
+        if (!isNaN(d.getTime())) {
+          const p = x => String(x).padStart(2,'0');
+          const formatted = `${p(d.getDate())}/${p(d.getMonth()+1)}/${d.getFullYear()}`;
+          return formatted === hoy;
+        }
+      } catch(_) {}
+      return false;
+    });
     registrosHoy.forEach(r => {
-      const np = nps.find(n => n.np === String(r.np));
+      const np = nps.find(n => String(n.np) === String(r.np));
       if (!np) return;
       np.estado = String(r.estado).toLowerCase() === 'autorizado'   ? 'autorizado'
                 : String(r.estado).toLowerCase() === 'reprogramado' ? 'reprogramado'
                 : String(r.estado).toLowerCase() === 'parcial'      ? 'parcial'
                 : 'pendiente';
-      np.causa     = r.causa || null;
+      np.causa         = r.causa || null;
       np.cantAutorizar = parseFloat(r.cant) || np.cantOriginal;
-      if (np.estado !== 'pendiente') np.horaAut = r.horaAut || r.hora_aut || null;
+      if (np.estado !== 'pendiente') np.horaAut = r.horaAut || null;
     });
   } catch(err) {
     console.warn('No se pudo restaurar estado desde Sheets:', err);
