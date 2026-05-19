@@ -1475,7 +1475,7 @@ textarea.sidebar-input {
 // ── CONFIG ────────────────────────────────────────────────────────────────────
 const SHEET_ID   = '1Z6PSsKjYca1386zi5RkMqfdE2g2pEJPkeZdDhnvJdcQ';
 const API_KEY    = 'AIzaSyBkQBvrcGH-lFTfZx9gxNVhSbZAjFQaLVM';
-const RANGE      = 'A:Z';
+const RANGE      = 'A:AB';
 const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyCCu6wh-eBdrLszpEyMMAyoL4i3C8nmpSeivKMguAdP2AbCBbUK7SAO19DgG1w0KEM/exec';
 
 // ── ESCRITURA EN SHEETS VÍA APPS SCRIPT ──────────────────────────────────────
@@ -1722,7 +1722,7 @@ function parseSheetData(rows) {
   const iDet   = col('detalle');
   const iCant  = col('cant');
   const iUM    = col('um');
-  const iFecha = 24; // Columna Y (índice 24) — FECHA ENTREGA con formato fecha de Google Sheets
+  const iFecha = 27; // Columna AB (índice 27) — FECHA ENTREGA con formato fecha de Google Sheets
 
   console.log('Columnas mapeadas → NP:', iNP, 'Cliente:', iCli, 'Detalle:', iDet, 'Cant:', iCant, 'UM:', iUM, 'Fecha:', iFecha);
 
