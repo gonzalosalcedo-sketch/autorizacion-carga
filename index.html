@@ -1722,7 +1722,9 @@ function parseSheetData(rows) {
   const iDet   = col('detalle');
   const iCant  = col('cant');
   const iUM    = col('um');
-  const iFecha = 27; // Columna AB (índice 27) — FECHA ENTREGA con formato fecha de Google Sheets
+  // Buscar fecha por encabezado primero, fallback a columna AB (27)
+  let iFecha = col('fecha entrega');
+  if (iFecha < 0) iFecha = 27;
 
   console.log('Columnas mapeadas → NP:', iNP, 'Cliente:', iCli, 'Detalle:', iDet, 'Cant:', iCant, 'UM:', iUM, 'Fecha:', iFecha);
 
@@ -1739,7 +1741,8 @@ function parseSheetData(rows) {
     const cantRaw = iCant >= 0 ? (r[iCant] || '0').toString().replace(/\./g,'').replace(',','.') : '0';
     const cant = parseFloat(cantRaw) || 0;
     const um   = iUM  >= 0 ? (r[iUM]  || '').toString().trim() : '';
-    const fecha = iFecha >= 0 ? (r[iFecha] || '').toString().trim() : '';
+    // Si la fila es más corta que el índice de fecha, la celda está vacía
+    const fecha = (iFecha >= 0 && r.length > iFecha) ? (r[iFecha] || '').toString().trim() : '';
 
     if (!np && !cli) continue;
 
