@@ -1722,9 +1722,9 @@ function parseSheetData(rows) {
   const iDet   = col('detalle');
   const iCant  = col('cant');
   const iUM    = col('um');
-  // Buscar fecha por encabezado primero, fallback a columna AB (27)
-  let iFecha = col('fecha entrega');
-  if (iFecha < 0) iFecha = 27;
+  // Forzar columna AB (índice 27) — la búsqueda por nombre encuentra falsos positivos
+  // porque hay encabezados intermedios que contienen "fecha"
+  const iFecha = 27;
 
   console.log('Columnas mapeadas → NP:', iNP, 'Cliente:', iCli, 'Detalle:', iDet, 'Cant:', iCant, 'UM:', iUM, 'Fecha:', iFecha);
 
